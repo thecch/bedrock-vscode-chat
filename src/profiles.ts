@@ -1,6 +1,11 @@
 /**
  * Model profile system for handling provider-specific capabilities and token limits.
  * Provides accurate metadata for Claude models without external API calls.
+ *
+ * Claude model IDs encode family + version in a consistent naming convention, so
+ * capabilities and token limits are derived algorithmically rather than maintained
+ * as a per-model lookup table. New models following the convention are handled
+ * automatically without code changes.
  */
 
 export interface ModelProfile {
@@ -24,66 +29,7 @@ export interface ModelProfile {
 	supportedEffortLevels?: readonly string[];
 }
 
-/**
- * Known Claude model profiles with accurate token limits and capability flags.
- * Patterns are matched in order (most specific first) against the model ID.
- */
 const EFFORT_LEVELS_FULL = ['low', 'medium', 'high', 'max'] as const;
-
-const CLAUDE_PROFILES: Array<{ pattern: string; profile: Omit<ModelProfile, 'supportsToolChoice' | 'toolResultFormat'> }> = [
-	{
-		pattern: 'claude-opus-4-7',
-		profile: { supportsThinking: true, supportsAdaptiveThinking: true, supportsThinkingEffort: true, supports1MContext: true, maxInputTokens: 200_000, maxOutputTokens: 128_000, supportedEffortLevels: EFFORT_LEVELS_FULL },
-	},
-	{
-		pattern: 'claude-opus-4-6',
-		profile: { supportsThinking: true, supportsAdaptiveThinking: true, supportsThinkingEffort: true, supports1MContext: true, maxInputTokens: 200_000, maxOutputTokens: 128_000, supportedEffortLevels: EFFORT_LEVELS_FULL },
-	},
-	{
-		pattern: 'claude-opus-4-5',
-		profile: { supportsThinking: true, supportsAdaptiveThinking: true, supportsThinkingEffort: true, supports1MContext: false, maxInputTokens: 200_000, maxOutputTokens: 32_000, supportedEffortLevels: EFFORT_LEVELS_FULL },
-	},
-	{
-		pattern: 'claude-opus-4-1',
-		profile: { supportsThinking: true, supportsAdaptiveThinking: false, supportsThinkingEffort: false, supports1MContext: false, maxInputTokens: 200_000, maxOutputTokens: 32_000 },
-	},
-	{
-		pattern: 'claude-sonnet-4-6',
-		profile: { supportsThinking: true, supportsAdaptiveThinking: true, supportsThinkingEffort: true, supports1MContext: true, maxInputTokens: 200_000, maxOutputTokens: 64_000, supportedEffortLevels: EFFORT_LEVELS_FULL },
-	},
-	{
-		pattern: 'claude-sonnet-4-5',
-		profile: { supportsThinking: true, supportsAdaptiveThinking: true, supportsThinkingEffort: true, supports1MContext: true, maxInputTokens: 200_000, maxOutputTokens: 64_000, supportedEffortLevels: EFFORT_LEVELS_FULL },
-	},
-	{
-		pattern: 'claude-sonnet-4-v',
-		profile: { supportsThinking: true, supportsAdaptiveThinking: false, supportsThinkingEffort: false, supports1MContext: true, maxInputTokens: 200_000, maxOutputTokens: 64_000 },
-	},
-	{
-		pattern: 'claude-haiku-4-5',
-		profile: { supportsThinking: true, supportsAdaptiveThinking: false, supportsThinkingEffort: false, supports1MContext: false, maxInputTokens: 200_000, maxOutputTokens: 64_000 },
-	},
-	{
-		pattern: 'claude-3-7-sonnet',
-		profile: { supportsThinking: true, supportsAdaptiveThinking: false, supportsThinkingEffort: false, supports1MContext: false, maxInputTokens: 200_000, maxOutputTokens: 64_000 },
-	},
-	{
-		pattern: 'claude-3-5-sonnet',
-		profile: { supportsThinking: false, supportsAdaptiveThinking: false, supportsThinkingEffort: false, supports1MContext: false, maxInputTokens: 200_000, maxOutputTokens: 8_192 },
-	},
-	{
-		pattern: 'claude-3-5-haiku',
-		profile: { supportsThinking: false, supportsAdaptiveThinking: false, supportsThinkingEffort: false, supports1MContext: false, maxInputTokens: 200_000, maxOutputTokens: 8_192 },
-	},
-	{
-		pattern: 'claude-3-sonnet',
-		profile: { supportsThinking: false, supportsAdaptiveThinking: false, supportsThinkingEffort: false, supports1MContext: false, maxInputTokens: 200_000, maxOutputTokens: 4_096 },
-	},
-	{
-		pattern: 'claude-3-haiku',
-		profile: { supportsThinking: false, supportsAdaptiveThinking: false, supportsThinkingEffort: false, supports1MContext: false, maxInputTokens: 200_000, maxOutputTokens: 4_096 },
-	},
-];
 
 const DEFAULT_PROFILE: ModelProfile = {
 	supportsToolChoice: false,
@@ -95,6 +41,86 @@ const DEFAULT_PROFILE: ModelProfile = {
 	maxInputTokens: 200_000,
 	maxOutputTokens: 4_096,
 };
+
+/**
+ * Parse a Claude model ID part into family + version numbers.
+ *
+ * Handles two naming conventions Anthropic uses on Bedrock:
+ *   New: claude-{family}-{major}-{minor}-v{n}:{n}  (e.g. claude-opus-4-6-v1:0)
+ *   Old: claude-{major}-{minor}-{family}-...        (e.g. claude-3-7-sonnet-20250219-v1:0)
+ */
+function parseClaudeVersion(modelPart: string): { family: string; major: number; minor: number } | undefined {
+	// New naming: claude-{family}-{major}-{minor}
+	let m = modelPart.match(/claude-(opus|sonnet|haiku)-(\d+)-(\d+)/);
+	if (m) return { family: m[1], major: parseInt(m[2]), minor: parseInt(m[3]) };
+
+	// New naming with only major: claude-{family}-{major}-v
+	m = modelPart.match(/claude-(opus|sonnet|haiku)-(\d+)-v/);
+	if (m) return { family: m[1], major: parseInt(m[2]), minor: 0 };
+
+	// Old naming: claude-{major}-{minor}-{family}
+	m = modelPart.match(/claude-(\d+)-(\d+)-(sonnet|haiku|opus)/);
+	if (m) return { family: m[3], major: parseInt(m[1]), minor: parseInt(m[2]) };
+
+	// Old naming without minor: claude-{major}-{family}
+	m = modelPart.match(/claude-(\d+)-(sonnet|haiku|opus)/);
+	if (m) return { family: m[2], major: parseInt(m[1]), minor: 0 };
+
+	return undefined;
+}
+
+/**
+ * Derive Claude capability flags and token limits from parsed version info.
+ *
+ * Rules based on Anthropic's capability rollout by generation:
+ *   - Claude 4 Opus:          adaptive thinking + effort, 128K output (4.5+), 32K (4.1)
+ *   - Claude 4 Sonnet 4.5+:   adaptive thinking + effort, 64K output
+ *   - Claude 4 Sonnet <4.5:   thinking only, 64K output
+ *   - Claude 4 Haiku:         thinking only, 64K output
+ *   - Claude 3.7:             thinking (enabled) only, 64K output
+ *   - Claude 3.5:             no thinking, 8K output
+ *   - Claude 3.0:             no thinking, 4K output
+ *   - Claude 5+:              assume full capabilities (forward-compatible)
+ */
+function deriveClaudeCapabilities(family: string, major: number, minor: number): Omit<ModelProfile, 'supportsToolChoice' | 'toolResultFormat'> {
+	if (major >= 5) {
+		// Future generation — assume full capabilities
+		return { supportsThinking: true, supportsAdaptiveThinking: true, supportsThinkingEffort: true, supports1MContext: true, maxInputTokens: 200_000, maxOutputTokens: 128_000, supportedEffortLevels: EFFORT_LEVELS_FULL };
+	}
+
+	if (major === 4) {
+		if (family === 'opus') {
+			const maxOutput = minor >= 5 ? 128_000 : 32_000;
+			return { supportsThinking: true, supportsAdaptiveThinking: true, supportsThinkingEffort: true, supports1MContext: true, maxInputTokens: 200_000, maxOutputTokens: maxOutput, supportedEffortLevels: EFFORT_LEVELS_FULL };
+		}
+		if (family === 'sonnet') {
+			if (minor >= 5) {
+				return { supportsThinking: true, supportsAdaptiveThinking: true, supportsThinkingEffort: true, supports1MContext: true, maxInputTokens: 200_000, maxOutputTokens: 64_000, supportedEffortLevels: EFFORT_LEVELS_FULL };
+			}
+			// Sonnet 4.0 (original): thinking but no adaptive/effort
+			return { supportsThinking: true, supportsAdaptiveThinking: false, supportsThinkingEffort: false, supports1MContext: true, maxInputTokens: 200_000, maxOutputTokens: 64_000 };
+		}
+		if (family === 'haiku') {
+			return { supportsThinking: true, supportsAdaptiveThinking: false, supportsThinkingEffort: false, supports1MContext: false, maxInputTokens: 200_000, maxOutputTokens: 64_000 };
+		}
+		// Unknown Claude 4 family — assume adaptive + effort
+		return { supportsThinking: true, supportsAdaptiveThinking: true, supportsThinkingEffort: true, supports1MContext: true, maxInputTokens: 200_000, maxOutputTokens: 64_000, supportedEffortLevels: EFFORT_LEVELS_FULL };
+	}
+
+	if (major === 3) {
+		if (minor >= 7) {
+			// Claude 3.7 Sonnet: extended thinking (enabled only), 64K output
+			return { supportsThinking: true, supportsAdaptiveThinking: false, supportsThinkingEffort: false, supports1MContext: false, maxInputTokens: 200_000, maxOutputTokens: 64_000 };
+		}
+		if (minor >= 5) {
+			return { supportsThinking: false, supportsAdaptiveThinking: false, supportsThinkingEffort: false, supports1MContext: false, maxInputTokens: 200_000, maxOutputTokens: 8_192 };
+		}
+		return { supportsThinking: false, supportsAdaptiveThinking: false, supportsThinkingEffort: false, supports1MContext: false, maxInputTokens: 200_000, maxOutputTokens: 4_096 };
+	}
+
+	// Claude 1/2 or unknown major
+	return { supportsThinking: false, supportsAdaptiveThinking: false, supportsThinkingEffort: false, supports1MContext: false, maxInputTokens: 100_000, maxOutputTokens: 4_096 };
+}
 
 /**
  * Strip region/global prefix from a Bedrock model ID.
@@ -132,16 +158,15 @@ export function getModelProfile(modelId: string): ModelProfile {
 
 	switch (provider) {
 		case 'anthropic': {
-			for (const entry of CLAUDE_PROFILES) {
-				if (modelPart.includes(entry.pattern)) {
-					return {
-						supportsToolChoice: true,
-						toolResultFormat: 'text',
-						...entry.profile,
-					};
-				}
+			const version = parseClaudeVersion(modelPart);
+			if (version) {
+				return {
+					supportsToolChoice: true,
+					toolResultFormat: 'text',
+					...deriveClaudeCapabilities(version.family, version.major, version.minor),
+				};
 			}
-			// Unknown Claude model — tool choice but no thinking
+			// Unrecognised Claude model — tool choice but no thinking
 			return { ...DEFAULT_PROFILE, supportsToolChoice: true };
 		}
 
