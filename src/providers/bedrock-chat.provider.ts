@@ -23,6 +23,9 @@ export class BedrockChatProvider implements LanguageModelChatProvider {
 	private chatRequestHandler: ChatRequestHandler;
 	private tokenEstimator: TokenEstimator;
 
+	private readonly _onDidChangeLanguageModelInformation = new vscode.EventEmitter<void>();
+	readonly onDidChangeLanguageModelChatInformation = this._onDidChangeLanguageModelInformation.event;
+
 	constructor(
 		private readonly configService: ConfigurationService,
 		private readonly authService: AuthenticationService
@@ -33,25 +36,40 @@ export class BedrockChatProvider implements LanguageModelChatProvider {
 	}
 
 	/**
+	 * Signal VS Code to re-fetch the model list
+	 */
+	notifyModelInformationChanged(): void {
+		this._onDidChangeLanguageModelInformation.fire();
+	}
+
+	/**
+	 * Dispose resources
+	 */
+	dispose(): void {
+		this._onDidChangeLanguageModelInformation.dispose();
+	}
+
+	/**
 	 * Handle configuration changes
 	 */
 	handleConfigurationChange(): void {
 		this.modelService.handleConfigurationChange();
 		this.chatRequestHandler.handleConfigurationChange();
+		this.notifyModelInformationChanged();
 	}
 
 	/**
-	 * Prepare language model chat information (called on startup)
+	 * Prepare language model chat information (called by VS Code to get the model list)
 	 */
 	async prepareLanguageModelChatInformation(
 		options: { silent: boolean },
 		_token: CancellationToken
 	): Promise<LanguageModelChatInformation[]> {
-		return this.provideLanguageModelChatInformation(options, _token);
+		return await this.modelService.getLanguageModelChatInformation(options.silent ?? false);
 	}
 
 	/**
-	 * Provide language model chat information (called when user requests model list)
+	 * Provide language model chat information (required by @types/vscode interface)
 	 */
 	async provideLanguageModelChatInformation(
 		options: { silent: boolean },

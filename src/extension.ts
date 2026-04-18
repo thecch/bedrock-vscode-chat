@@ -16,7 +16,8 @@ export function activate(context: vscode.ExtensionContext) {
 	const authService = new AuthenticationService(configService);
 	const provider = new BedrockChatProvider(configService, authService);
 
-	vscode.lm.registerLanguageModelChatProvider("bedrock", provider);
+	const providerDisposable = vscode.lm.registerLanguageModelChatProvider("bedrock", provider);
+	context.subscriptions.push(providerDisposable, provider);
 
 	// Listen for configuration changes
 	context.subscriptions.push(

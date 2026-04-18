@@ -107,6 +107,14 @@ export class ConfigurationService {
 	}
 
 	/**
+	 * Get the preferred default model substring
+	 */
+	getDefaultModel(): string {
+		const config = vscode.workspace.getConfiguration(this.configSection);
+		return config.get<string>('defaultModel', '').trim();
+	}
+
+	/**
 	 * Get per-model overrides for a given model ID.
 	 * Keys in modelOverrides are matched as substrings against the model ID.
 	 */

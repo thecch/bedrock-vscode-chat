@@ -124,11 +124,17 @@ export class ModelService {
 		}
 
 		// Sort preferred model to front so VS Code selects it as default
-		const defaultModel = vscode.workspace.getConfiguration('languageModelChatProvider.bedrock').get<string>('defaultModel', '').trim();
+		const defaultModel = this.configService.getDefaultModel();
 		if (defaultModel) {
 			const idx = infos.findIndex(i => i.id.includes(defaultModel));
 			if (idx > 0) {
-				infos.unshift(...infos.splice(idx, 1));
+				const preferred = infos.splice(idx, 1);
+				infos.unshift(...preferred);
+				logger.log(`[Model Service] Moved preferred model to front: ${preferred[0].id}`);
+			} else if (idx === 0) {
+				logger.log(`[Model Service] Preferred model already first: ${infos[0].id}`);
+			} else {
+				logger.log(`[Model Service] Preferred model not found matching "${defaultModel}". Available:`, infos.map(i => i.id));
 			}
 		}
 
