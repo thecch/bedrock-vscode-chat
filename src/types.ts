@@ -48,6 +48,37 @@ export interface BedrockSystemBlock {
 }
 
 /**
+ * Captured thinking block from a stream response.
+ */
+export interface ThinkingBlock {
+	signature?: string;
+	text: string;
+}
+
+/**
+ * Stream processing result.
+ */
+export interface StreamResult {
+	thinkingBlock?: ThinkingBlock | null;
+}
+
+/**
+ * Extension settings read from VS Code configuration.
+ */
+export interface BedrockChatSettings {
+	thinking: {
+		enabled: boolean;
+		budgetTokens: number;
+		effort: string;
+	};
+	context1M: {
+		enabled: boolean;
+	};
+	contextLimit: number;
+	maxOutputTokens: number;
+}
+
+/**
  * Bedrock tool specification.
  */
 export interface BedrockToolSpec {

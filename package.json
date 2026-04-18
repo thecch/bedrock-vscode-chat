@@ -33,6 +33,59 @@
 	},
 	"license": "MIT",
 	"contributes": {
+		"configuration": {
+			"title": "AWS Bedrock Chat",
+			"properties": {
+				"bedrockChat.thinking.enabled": {
+					"type": "boolean",
+					"default": true,
+					"description": "Enable extended thinking for supported Claude models.",
+					"scope": "resource"
+				},
+				"bedrockChat.thinking.budgetTokens": {
+					"type": "number",
+					"default": 20000,
+					"minimum": 1024,
+					"description": "Tokens allocated for thinking. Minimum 1024. Default is 20% of max output tokens.",
+					"scope": "resource"
+				},
+				"bedrockChat.thinking.effort": {
+					"type": "string",
+					"default": "max",
+					"enum": ["max", "high", "medium", "low"],
+					"enumDescriptions": [
+						"Maximum thinking effort.",
+						"High effort - thorough reasoning.",
+						"Balanced approach.",
+						"Most efficient."
+					],
+					"description": "Thinking effort level for Claude models.",
+					"scope": "resource"
+				},
+				"bedrockChat.context1M.enabled": {
+					"type": "boolean",
+					"default": true,
+					"description": "Enable 1M context model variant for Claude Opus 4.6+. Context capped to contextLimit.",
+					"scope": "resource"
+				},
+				"bedrockChat.contextLimit": {
+					"type": "number",
+					"default": 400000,
+					"minimum": 200000,
+					"maximum": 1000000,
+					"description": "Max context window (tokens). 1M model used but input capped here. Default 400k.",
+					"scope": "resource"
+				},
+				"bedrockChat.maxOutputTokens": {
+					"type": "number",
+					"default": 64000,
+					"minimum": 4096,
+					"maximum": 128000,
+					"description": "Max output tokens for Claude models when thinking is enabled.",
+					"scope": "resource"
+				}
+			}
+		},
 		"languageModelChatProviders": [
 			{
 				"vendor": "bedrock",
