@@ -5,6 +5,7 @@ import { logger } from "./logger";
 export class StreamProcessor {
 	private toolBuffer: ToolCallBufferManager;
 	private thinkingBuffer: string = "";
+	private thinkingSignature: string = "";
 	private hasEmittedThinking: boolean = false;
 
 	constructor() {
@@ -18,6 +19,7 @@ export class StreamProcessor {
 	): Promise<void> {
 		this.toolBuffer.reset();
 		this.thinkingBuffer = "";
+		this.thinkingSignature = "";
 		this.hasEmittedThinking = false;
 
 		try {
@@ -43,19 +45,27 @@ export class StreamProcessor {
 					const idx = event.contentBlockDelta.contentBlockIndex ?? 0;
 					const delta = event.contentBlockDelta.delta;
 
-					// Handle thinking content (Bedrock uses 'reasoningContent' not 'thinking')
-					if (delta?.reasoningContent?.text) {
-						const thinkingText = delta.reasoningContent.text;
-						this.thinkingBuffer += thinkingText;
-						// Emit thinking part directly - LanguageModelThinkingPart is enabled via package.json
-						try {
-							const ThinkingPart = (vscode as any).LanguageModelThinkingPart;
-							if (ThinkingPart) {
-								progress.report(new ThinkingPart(thinkingText));
-								this.hasEmittedThinking = true;
+					// Handle thinking content (Bedrock uses 'reasoningContent')
+					if (delta?.reasoningContent) {
+						const reasoning = delta.reasoningContent;
+
+						// Stream thinking text to the UI via LanguageModelThinkingPart
+						if (typeof reasoning.text === 'string') {
+							this.thinkingBuffer += reasoning.text;
+							try {
+								const ThinkingPart = (vscode as any).LanguageModelThinkingPart;
+								if (ThinkingPart) {
+									progress.report(new ThinkingPart(reasoning.text));
+									this.hasEmittedThinking = true;
+								}
+							} catch (e) {
+								logger.warn("[StreamProcessor] LanguageModelThinkingPart not available", e);
 							}
-						} catch (e) {
-							logger.warn("[StreamProcessor] LanguageModelThinkingPart not available", e);
+						}
+
+						// Capture thinking signature (used for multi-turn thinking)
+						if (typeof reasoning.signature === 'string') {
+							this.thinkingSignature += reasoning.signature;
 						}
 					}
 
@@ -75,11 +85,27 @@ export class StreamProcessor {
 					await this.toolBuffer.tryEmit(idx, progress, true);
 				} else if (event.messageStop) {
 					await this.toolBuffer.emitAll(progress);
+
+					if (this.hasEmittedThinking) {
+						logger.log("[StreamProcessor] Thinking completed, buffer length:", this.thinkingBuffer.length,
+							"signature length:", this.thinkingSignature.length);
+					}
+				} else if (event.metadata) {
+					// Log usage metadata for debugging
+					const usage = event.metadata.usage;
+					if (usage) {
+						logger.log("[StreamProcessor] Token usage:", {
+							inputTokens: usage.inputTokens,
+							outputTokens: usage.outputTokens,
+							totalTokens: usage.totalTokens,
+						});
+					}
 				}
 			}
 		} finally {
 			this.toolBuffer.reset();
 			this.thinkingBuffer = "";
+			this.thinkingSignature = "";
 			this.hasEmittedThinking = false;
 		}
 	}

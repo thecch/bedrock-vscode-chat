@@ -108,10 +108,20 @@ export interface ToolCallBuffer {
 }
 
 /**
+ * Thinking type for Claude models.
+ */
+export type ThinkingType = 'adaptive' | 'enabled' | 'disabled';
+
+/**
+ * Thinking effort level for Claude models that support it.
+ */
+export type ThinkingEffort = 'max' | 'high' | 'medium' | 'low';
+
+/**
  * Bedrock thinking configuration for extended thinking models.
  */
 export interface BedrockThinkingConfig {
-	type: 'enabled' | 'disabled';
+	type: ThinkingType;
 	budget_tokens?: number;
 }
 

@@ -13,6 +13,7 @@ import { StreamProcessor } from "../stream-processor";
 import { convertMessages } from "../converters/messages";
 import { convertTools } from "../converters/tools";
 import { validateRequest } from "../validation";
+import { getModelProfile } from "../profiles";
 import { logger } from "../logger";
 import { ModelService } from "../services/model.service";
 import { AuthenticationService } from "../services/authentication.service";
@@ -118,29 +119,76 @@ export class ChatRequestHandler {
 				throw new Error("Message exceeds token limit.");
 			}
 
-			// Check if thinking is configured and model supports it
+			// --- Resolve thinking and effort for this model ---
+			const profile = getModelProfile(model.id);
 			const thinkingConfig = this.configService.getThinkingConfig();
-			const supportsThinking = thinkingConfig ? await this.modelService.supportsThinking(model.id) : false;
+			const effortSetting = this.configService.getThinkingEffort();
 
+			// Determine effective thinking type for this specific model
+			let useThinking = false;
+			let thinkingField: Record<string, unknown> | undefined;
+
+			if (thinkingConfig) {
+				if (thinkingConfig.type === 'adaptive' && profile.supportsAdaptiveThinking) {
+					useThinking = true;
+					thinkingField = { type: 'adaptive' };
+					logger.log("[Chat Request Handler] Using adaptive thinking");
+				} else if (thinkingConfig.type === 'adaptive' && profile.supportsThinking && !profile.supportsAdaptiveThinking) {
+					// Fallback: model supports thinking but not adaptive → use enabled with budget
+					useThinking = true;
+					const budget = this.configService.getThinkingBudgetTokens();
+					thinkingField = { type: 'enabled', budget_tokens: Math.min(budget, model.maxOutputTokens) };
+					logger.log("[Chat Request Handler] Model doesn't support adaptive, falling back to enabled with budget:", budget);
+				} else if (thinkingConfig.type === 'enabled' && profile.supportsThinking) {
+					useThinking = true;
+					const budget = Math.min(thinkingConfig.budget_tokens!, model.maxOutputTokens);
+					thinkingField = { type: 'enabled', budget_tokens: budget };
+					logger.log("[Chat Request Handler] Using enabled thinking with budget:", budget);
+				}
+			}
+
+			// Determine effective effort for this model
+			// Priority: model picker dropdown (modelConfiguration) > VS Code settings
+			let effortField: Record<string, unknown> | undefined;
+			if (profile.supportsThinkingEffort) {
+				const pickerEffort = (options as any).modelConfiguration?.reasoningEffort;
+				const effectiveEffort = (typeof pickerEffort === 'string' && ['low', 'medium', 'high', 'max'].includes(pickerEffort))
+					? pickerEffort
+					: effortSetting;
+				effortField = { effort: effectiveEffort };
+				logger.log("[Chat Request Handler] Using effort level:", effectiveEffort,
+					pickerEffort ? `(from model picker: ${pickerEffort})` : '(from settings)');
+			}
+
+			// Build max output tokens
+			const requestedMaxTokens = options.modelOptions?.max_tokens || model.maxOutputTokens;
+			const effectiveMaxTokens = Math.min(requestedMaxTokens, model.maxOutputTokens);
+
+			// Build inference config
+			// When thinking is active, temperature MUST be 1.0 and topP should be omitted
 			const requestInput: ConverseStreamCommandInput = {
 				modelId: model.id,
 				messages: converted.messages as any,
 				inferenceConfig: {
-					maxTokens: Math.min(options.modelOptions?.max_tokens || 4096, model.maxOutputTokens),
-					// Temperature must be 1.0 when thinking is enabled, otherwise use user preference or default
-					temperature: (thinkingConfig && supportsThinking) ? 1.0 : (options.modelOptions?.temperature ?? 0.7),
+					maxTokens: effectiveMaxTokens,
 				},
 			};
 
-			if (converted.system.length > 0) {
-				requestInput.system = converted.system as any;
-			}
-
-			if (options.modelOptions) {
-				const mo = options.modelOptions as Record<string, unknown>;
-				if (typeof mo.top_p === "number") {
+			if (useThinking) {
+				// Temperature must be exactly 1.0 when thinking is enabled
+				requestInput.inferenceConfig!.temperature = 1.0;
+			} else {
+				// Use caller-specified or default temperature/topP
+				requestInput.inferenceConfig!.temperature = options.modelOptions?.temperature ?? 0.7;
+				const mo = options.modelOptions as Record<string, unknown> | undefined;
+				if (mo && typeof mo.top_p === "number") {
 					requestInput.inferenceConfig!.topP = mo.top_p;
 				}
+			}
+
+			// Stop sequences (always applicable)
+			if (options.modelOptions) {
+				const mo = options.modelOptions as Record<string, unknown>;
 				if (typeof mo.stop === "string") {
 					requestInput.inferenceConfig!.stopSequences = [mo.stop];
 				} else if (Array.isArray(mo.stop)) {
@@ -148,19 +196,37 @@ export class ChatRequestHandler {
 				}
 			}
 
+			if (converted.system.length > 0) {
+				requestInput.system = converted.system as any;
+			}
+
 			if (toolConfig) {
 				requestInput.toolConfig = toolConfig as any;
 			}
 
-			if (thinkingConfig && supportsThinking) {
-				requestInput.additionalModelRequestFields = {
-					...(requestInput.additionalModelRequestFields as any),
-					thinking: thinkingConfig,
-				};
-				logger.log("[Chat Request Handler] Extended thinking enabled with budget:", thinkingConfig.budget_tokens);
+			// Build additionalModelRequestFields for thinking + effort
+			const additionalFields: Record<string, unknown> = {};
+
+			if (useThinking && thinkingField) {
+				additionalFields.thinking = thinkingField;
 			}
 
-			logger.log("[Chat Request Handler] Starting streaming request");
+			if (effortField) {
+				additionalFields.output_config = effortField;
+			}
+
+			if (Object.keys(additionalFields).length > 0) {
+				requestInput.additionalModelRequestFields = additionalFields as any;
+				logger.log("[Chat Request Handler] additionalModelRequestFields:", JSON.stringify(additionalFields));
+			}
+
+			logger.log("[Chat Request Handler] Starting streaming request", {
+				modelId: model.id,
+				maxTokens: effectiveMaxTokens,
+				thinking: useThinking ? thinkingField : 'disabled',
+				effort: effortField ?? 'not supported',
+				temperature: requestInput.inferenceConfig!.temperature,
+			});
 			const credentials = this.authService.getCredentials(authConfig);
 			const stream = await this.bedrockClient.startConversationStream(credentials, requestInput);
 

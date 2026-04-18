@@ -1,10 +1,11 @@
 import * as vscode from "vscode";
 import type { LanguageModelChatInformation } from "vscode";
-import type { BedrockModelSummary, AuthConfig } from "../types";
+import type { BedrockModelSummary } from "../types";
 import { BedrockClient } from "../clients/bedrock.client";
 import { OpenRouterClient } from "./openrouter.client";
 import { AuthenticationService } from "./authentication.service";
 import { ConfigurationService } from "./configuration.service";
+import { getModelProfile, buildConfigurationSchema } from "../profiles";
 import { logger } from "../logger";
 
 const DEFAULT_MAX_OUTPUT_TOKENS = 4096;
@@ -81,13 +82,25 @@ export class ModelService {
 			const hasInferenceProfile = availableProfileIds.has(inferenceProfileId);
 			const modelIdToUse = hasInferenceProfile ? inferenceProfileId : m.modelId;
 
-			// Try to get model properties from OpenRouter, fall back to defaults
-			const properties = await this.openRouterClient.getModelProperties(modelIdToUse);
-			const maxInput = properties?.contextLength ?? DEFAULT_CONTEXT_LENGTH;
-			const maxOutput = properties?.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS;
+			// Use profile-based token limits for known Claude models, fall back to OpenRouter
+			const profile = getModelProfile(modelIdToUse);
+			let maxInput: number;
+			let maxOutput: number;
+
+			if (profile.maxInputTokens > DEFAULT_CONTEXT_LENGTH || profile.maxOutputTokens > DEFAULT_MAX_OUTPUT_TOKENS) {
+				// Known model with accurate profile data
+				maxInput = profile.maxInputTokens;
+				maxOutput = profile.maxOutputTokens;
+			} else {
+				// Unknown model — try OpenRouter, fall back to defaults
+				const properties = await this.openRouterClient.getModelProperties(modelIdToUse);
+				maxInput = properties?.contextLength ?? DEFAULT_CONTEXT_LENGTH;
+				maxOutput = properties?.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS;
+			}
 			const vision = m.inputModalities.includes("IMAGE");
 
-			const modelInfo: LanguageModelChatInformation = {
+			const configSchema = buildConfigurationSchema(profile);
+			const modelInfo = {
 				id: modelIdToUse,
 				name: m.modelName,
 				tooltip: `AWS Bedrock - ${m.providerName}${hasInferenceProfile ? ' (Cross-Region)' : ''}`,
@@ -96,11 +109,12 @@ export class ModelService {
 				version: "1.0.0",
 				maxInputTokens: maxInput,
 				maxOutputTokens: maxOutput,
+				...(configSchema ? { configurationSchema: configSchema } : {}),
 				capabilities: {
 					toolCalling: true,
 					imageInput: vision,
 				},
-			};
+			} satisfies LanguageModelChatInformation;
 			infos.push(modelInfo);
 		}
 
@@ -115,13 +129,25 @@ export class ModelService {
 	/**
 	 * Check if a model supports thinking/reasoning
 	 */
-	async supportsThinking(modelId: string): Promise<boolean> {
-		const thinkingConfig = this.configService.getThinkingConfig();
-		if (!thinkingConfig) {
-			return false;
-		}
+	supportsThinking(modelId: string): boolean {
+		const profile = getModelProfile(modelId);
+		return profile.supportsThinking || profile.supportsAdaptiveThinking;
+	}
 
-		return await this.openRouterClient.supportsThinking(modelId);
+	/**
+	 * Check if a model supports adaptive thinking
+	 */
+	supportsAdaptiveThinking(modelId: string): boolean {
+		const profile = getModelProfile(modelId);
+		return profile.supportsAdaptiveThinking;
+	}
+
+	/**
+	 * Check if a model supports thinking effort control
+	 */
+	supportsThinkingEffort(modelId: string): boolean {
+		const profile = getModelProfile(modelId);
+		return profile.supportsThinkingEffort;
 	}
 
 	/**

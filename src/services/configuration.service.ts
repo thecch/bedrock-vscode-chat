@@ -68,8 +68,21 @@ export class ConfigurationService {
 	 * Check if thinking (extended reasoning) is enabled
 	 */
 	isThinkingEnabled(): boolean {
+		return this.getThinkingType() !== 'disabled';
+	}
+
+	/**
+	 * Get thinking type: adaptive, enabled, or disabled
+	 */
+	getThinkingType(): 'adaptive' | 'enabled' | 'disabled' {
 		const config = vscode.workspace.getConfiguration(this.configSection);
-		return config.get<boolean>('thinkingEnabled', false);
+		const type = config.get<string>('thinkingType', 'adaptive');
+		if (type === 'adaptive' || type === 'enabled' || type === 'disabled') {
+			return type;
+		}
+		// Migration: treat old boolean thinkingEnabled as "enabled"
+		const legacyEnabled = config.get<boolean>('thinkingEnabled', false);
+		return legacyEnabled ? 'enabled' : 'adaptive';
 	}
 
 	/**
@@ -77,18 +90,37 @@ export class ConfigurationService {
 	 */
 	getThinkingBudgetTokens(): number {
 		const config = vscode.workspace.getConfiguration(this.configSection);
-		const budget = config.get<number>('thinkingBudgetTokens', 1024);
+		const budget = config.get<number>('thinkingBudgetTokens', 10000);
 		return Math.max(1024, budget);
 	}
 
 	/**
-	 * Get thinking configuration if enabled
+	 * Get thinking effort level
 	 */
-	getThinkingConfig(): { type: 'enabled' | 'disabled'; budget_tokens?: number } | undefined {
-		if (!this.isThinkingEnabled()) {
+	getThinkingEffort(): 'max' | 'high' | 'medium' | 'low' {
+		const config = vscode.workspace.getConfiguration(this.configSection);
+		const effort = config.get<string>('thinkingEffort', 'max');
+		if (effort === 'max' || effort === 'high' || effort === 'medium' || effort === 'low') {
+			return effort;
+		}
+		return 'max';
+	}
+
+	/**
+	 * Get thinking configuration if thinking is not disabled.
+	 * Returns undefined when disabled.
+	 */
+	getThinkingConfig(): { type: 'adaptive' | 'enabled'; budget_tokens?: number } | undefined {
+		const thinkingType = this.getThinkingType();
+		if (thinkingType === 'disabled') {
 			return undefined;
 		}
 
+		if (thinkingType === 'adaptive') {
+			return { type: 'adaptive' };
+		}
+
+		// type === 'enabled'
 		return {
 			type: 'enabled',
 			budget_tokens: this.getThinkingBudgetTokens(),
