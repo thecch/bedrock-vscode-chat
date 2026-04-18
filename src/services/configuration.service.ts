@@ -107,6 +107,33 @@ export class ConfigurationService {
 	}
 
 	/**
+	 * Get per-model overrides for a given model ID.
+	 * Keys in modelOverrides are matched as substrings against the model ID.
+	 */
+	getModelOverride(modelId: string): { thinkingType?: 'adaptive' | 'enabled' | 'disabled'; maxInputTokens?: number; maxOutputTokens?: number } {
+		const config = vscode.workspace.getConfiguration(this.configSection);
+		const overrides = config.get<Record<string, unknown>>('modelOverrides', {});
+		for (const [pattern, value] of Object.entries(overrides)) {
+			if (modelId.includes(pattern) && value && typeof value === 'object') {
+				return value as { thinkingType?: 'adaptive' | 'enabled' | 'disabled'; maxInputTokens?: number; maxOutputTokens?: number };
+			}
+		}
+		return {};
+	}
+
+	/**
+	 * Get thinking configuration for a specific model, applying per-model overrides.
+	 * Returns undefined when disabled.
+	 */
+	getThinkingConfigForModel(modelId: string): { type: 'adaptive' | 'enabled'; budget_tokens?: number } | undefined {
+		const override = this.getModelOverride(modelId);
+		const thinkingType = override.thinkingType ?? this.getThinkingType();
+		if (thinkingType === 'disabled') return undefined;
+		if (thinkingType === 'adaptive') return { type: 'adaptive' };
+		return { type: 'enabled', budget_tokens: this.getThinkingBudgetTokens() };
+	}
+
+	/**
 	 * Get thinking configuration if thinking is not disabled.
 	 * Returns undefined when disabled.
 	 */

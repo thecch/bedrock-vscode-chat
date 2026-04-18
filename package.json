@@ -116,6 +116,33 @@
 					"default": "max",
 					"description": "Thinking effort level for Claude Opus 4.5+ and Sonnet 4.5+. Controls how eagerly Claude spends tokens when reasoning.",
 					"title": "Thinking Effort"
+				},
+				"languageModelChatProvider.bedrock.modelOverrides": {
+					"type": "object",
+					"markdownDescription": "Per-model configuration overrides. Keys are model ID substrings (e.g. `claude-opus-4-6`, `claude-sonnet-4-5`). Each value can override `thinkingType`, `maxInputTokens`, or `maxOutputTokens` for that model.",
+					"default": {},
+					"additionalProperties": {
+						"type": "object",
+						"properties": {
+							"thinkingType": {
+								"type": "string",
+								"enum": ["adaptive", "enabled", "disabled"],
+								"description": "Override thinking mode for this model. Overrides the global thinkingType setting."
+							},
+							"maxInputTokens": {
+								"type": "number",
+								"minimum": 1000,
+								"description": "Override the maximum context window (input tokens) for this model."
+							},
+							"maxOutputTokens": {
+								"type": "number",
+								"minimum": 1000,
+								"description": "Override the maximum output tokens for this model."
+							}
+						},
+						"additionalProperties": false
+					},
+					"title": "Per-Model Overrides"
 				}
 			}
 		},

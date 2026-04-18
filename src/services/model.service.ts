@@ -97,6 +97,11 @@ export class ModelService {
 				maxInput = properties?.contextLength ?? DEFAULT_CONTEXT_LENGTH;
 				maxOutput = properties?.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS;
 			}
+
+			// Apply per-model token overrides from settings
+			const modelOverride = this.configService.getModelOverride(modelIdToUse);
+			if (modelOverride.maxInputTokens) maxInput = modelOverride.maxInputTokens;
+			if (modelOverride.maxOutputTokens) maxOutput = modelOverride.maxOutputTokens;
 			const vision = m.inputModalities.includes("IMAGE");
 
 			const configSchema = buildConfigurationSchema(profile);
