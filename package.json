@@ -117,6 +117,12 @@
 					"description": "Thinking effort level for Claude Opus 4.5+ and Sonnet 4.5+. Controls how eagerly Claude spends tokens when reasoning.",
 					"title": "Thinking Effort"
 				},
+				"languageModelChatProvider.bedrock.defaultModel": {
+					"type": "string",
+					"default": "",
+					"markdownDescription": "Substring of the model ID to use as default (e.g. `claude-opus-4-6`). This model will be listed first so VS Code selects it automatically.",
+					"title": "Default Model"
+				},
 				"languageModelChatProvider.bedrock.modelOverrides": {
 					"type": "object",
 					"markdownDescription": "Per-model configuration overrides. Keys are model ID substrings (e.g. `claude-opus-4-6`, `claude-sonnet-4-5`). Each value can override `thinkingType`, `maxInputTokens`, or `maxOutputTokens` for that model.",

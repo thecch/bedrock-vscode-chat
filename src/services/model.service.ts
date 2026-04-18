@@ -123,6 +123,15 @@ export class ModelService {
 			infos.push(modelInfo);
 		}
 
+		// Sort preferred model to front so VS Code selects it as default
+		const defaultModel = vscode.workspace.getConfiguration('languageModelChatProvider.bedrock').get<string>('defaultModel', '').trim();
+		if (defaultModel) {
+			const idx = infos.findIndex(i => i.id.includes(defaultModel));
+			if (idx > 0) {
+				infos.unshift(...infos.splice(idx, 1));
+			}
+		}
+
 		this.chatEndpoints = infos.map((info) => ({
 			model: info.id,
 			modelMaxPromptTokens: info.maxInputTokens + info.maxOutputTokens,
